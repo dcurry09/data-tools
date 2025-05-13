@@ -484,8 +484,8 @@ def group_analyze(df, group_col, target_col, numeric_cols=None, show_lift=True, 
     }, inplace=True)
     
     # Add additional metrics
-    grouped['pct_of_total'] = 100 * grouped['count'] / len(df)
-    grouped['pct_of_positives'] = 100 * grouped['positives'] / df[target_col].sum()
+    grouped['pct_of_total'] = grouped['count'] / len(df)
+    grouped['pct_of_positives'] = grouped['positives'] / df[target_col].sum()
     
     if show_lift:
         grouped['lift'] = grouped['rate'] / overall_rate
