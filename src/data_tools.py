@@ -1,9 +1,3 @@
-"""
-Data Science Toolkit for Interview
-Author: [Your Name]
-Date: May 2025
-Description: Comprehensive toolkit for data discovery, cleaning, exploration, modeling prep, and visualization
-"""
 
 import pandas as pd
 import numpy as np
