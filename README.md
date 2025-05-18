@@ -1,7 +1,5 @@
 # Data Science Toolkit
 
-A comprehensive Python toolkit for data exploration, analysis, and model preparation. Designed for efficient data science workflows with a focus on interpretability and reproducibility.
-
 ## 🚀 Quick Start
 
 ```bash
@@ -116,27 +114,3 @@ python data/generate_test_data.py
 - Core dependencies: pandas, numpy, scikit-learn, matplotlib, seaborn
 - Additional: tabulate for formatted table output
 - See `requirements.txt` for complete list
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/new-function`)
-3. Commit your changes (`git commit -m 'Add new function'`)
-4. Push to the branch (`git push origin feature/new-function`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- Built for data science interview preparation
-- Inspired by real-world data science workflows
-- Designed for clarity and ease of use
-
-## 📧 Contact
-
-Your Name - your.email@example.com
-
-Project Link: [https://github.com/yourusername/data-science-toolkit](https://github.com/yourusername/data-science-toolkit)
