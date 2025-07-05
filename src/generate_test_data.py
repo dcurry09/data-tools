@@ -65,7 +65,7 @@ def generate_test_data(n_rows=500, target_rate=0.2):
     categories = ['Bronze', 'Silver', 'Gold', 'Platinum']
     cat_data = np.random.choice(categories, n_rows, p=[0.4, 0.3, 0.2, 0.1])
     missing_mask = np.random.rand(n_rows) < 0.08
-    data['membership_level'] = np.where(missing_mask, np.nan, cat_data)
+    data['membership_level'] = np.where(missing_mask, None, cat_data)
     
     # 4. Date/time features
     start_date = datetime(2020, 1, 1)

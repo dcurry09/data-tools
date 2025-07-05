@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,6 +9,34 @@ from sklearn.model_selection import train_test_split
 from tabulate import tabulate
 import warnings
 warnings.filterwarnings('ignore')
+
+# Import statistical tools
+try:
+    from .stats_tools import (
+        compare_two_groups, compare_multiple_groups, chi_square_test,
+        bootstrap_confidence_interval, proportion_confidence_interval,
+        correlation_with_significance, multiple_comparison_correction,
+        cohens_d, cramers_v, interpret_p_value, format_p_value
+    )
+    STATS_AVAILABLE = True
+except ImportError:
+    try:
+        import stats_tools
+        compare_two_groups = stats_tools.compare_two_groups
+        compare_multiple_groups = stats_tools.compare_multiple_groups
+        chi_square_test = stats_tools.chi_square_test
+        bootstrap_confidence_interval = stats_tools.bootstrap_confidence_interval
+        proportion_confidence_interval = stats_tools.proportion_confidence_interval
+        correlation_with_significance = stats_tools.correlation_with_significance
+        multiple_comparison_correction = stats_tools.multiple_comparison_correction
+        cohens_d = stats_tools.cohens_d
+        cramers_v = stats_tools.cramers_v
+        interpret_p_value = stats_tools.interpret_p_value
+        format_p_value = stats_tools.format_p_value
+        STATS_AVAILABLE = True
+    except ImportError:
+        print("Warning: stats_tools module not available. Statistical tests will be disabled.")
+        STATS_AVAILABLE = False
 
 # Set plotting style
 plt.style.use('default')
@@ -387,9 +414,27 @@ def plot_quantile_analysis(df, value_column, target_column, n_quantiles=10):
     
     return analysis
 
-def find_signal_strength(df, target_column, exclude_columns=None):
+def find_signal_strength(df, target_column, exclude_columns=None, statistical_tests=True, alpha=0.05):
     """
-    Calculate signal strength (predictive power) for all numeric columns
+    Calculate signal strength (predictive power) for all numeric columns with statistical significance
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        Input DataFrame
+    target_column : str
+        Target column for analysis
+    exclude_columns : list, optional
+        Columns to exclude from analysis
+    statistical_tests : bool
+        Whether to include statistical significance tests
+    alpha : float
+        Significance level for tests
+        
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame with signal strength metrics and statistical test results
     """
     if exclude_columns is None:
         exclude_columns = []
@@ -406,49 +451,144 @@ def find_signal_strength(df, target_column, exclude_columns=None):
             # Skip columns with too many missing values
             if df[col].isnull().sum() / len(df) > 0.5:
                 continue
+            
+            # Clean data for analysis
+            clean_data = df.dropna(subset=[col, target_column])
+            if len(clean_data) < 10:  # Minimum sample size
+                continue
                 
             # Calculate correlation
-            correlation = df[col].corr(df[target_column])
+            correlation = clean_data[col].corr(clean_data[target_column])
+            
+            # Initialize statistical test results
+            correlation_p_value = None
+            correlation_significant = None
+            correlation_ci_lower = None
+            correlation_ci_upper = None
+            
+            # Perform correlation significance test if available
+            if statistical_tests and STATS_AVAILABLE:
+                corr_result = correlation_with_significance(
+                    clean_data[col].values, clean_data[target_column].values, 
+                    method='pearson', alpha=alpha
+                )
+                correlation_p_value = corr_result['p_value']
+                correlation_significant = corr_result['significant']
+                if corr_result['confidence_interval']:
+                    correlation_ci_lower, correlation_ci_upper = corr_result['confidence_interval']
             
             # Calculate information value (simplified)
-            analysis = analyze_by_quantiles(df.dropna(subset=[col]), col, target_column, n_quantiles=10)
-            
-            # Calculate max lift
-            max_lift = (analysis['positive_rate'].max() / df[target_column].mean()) - 1
+            try:
+                analysis = analyze_by_quantiles(clean_data, col, target_column, n_quantiles=10)
+                max_lift = (analysis['positive_rate'].max() / clean_data[target_column].mean()) - 1
+            except:
+                max_lift = 0
             
             # Calculate Gini coefficient
-            sorted_df = df.sort_values(by=col)
-            cumsum_target = sorted_df[target_column].cumsum() / sorted_df[target_column].sum()
-            cumsum_pop = np.arange(1, len(sorted_df) + 1) / len(sorted_df)
-            gini = 2 * (cumsum_pop * cumsum_target).sum() / len(sorted_df) - 1
+            try:
+                sorted_df = clean_data.sort_values(by=col)
+                cumsum_target = sorted_df[target_column].cumsum() / sorted_df[target_column].sum()
+                cumsum_pop = np.arange(1, len(sorted_df) + 1) / len(sorted_df)
+                gini = 2 * (cumsum_pop * cumsum_target).sum() / len(sorted_df) - 1
+            except:
+                gini = 0
             
-            signal_strength.append({
+            # Build result dictionary
+            result = {
                 'column': col,
                 'correlation': correlation,
                 'max_lift': max_lift,
                 'gini': gini,
-                'missing_pct': df[col].isnull().sum() / len(df)
-            })
+                'missing_pct': df[col].isnull().sum() / len(df),
+                'sample_size': len(clean_data)
+            }
+            
+            # Add statistical test results if available
+            if statistical_tests and STATS_AVAILABLE:
+                result.update({
+                    'correlation_p_value': correlation_p_value,
+                    'correlation_significant': correlation_significant,
+                    'correlation_ci_lower': correlation_ci_lower,
+                    'correlation_ci_upper': correlation_ci_upper
+                })
+            
+            signal_strength.append(result)
             
         except Exception as e:
             print(f"Error processing {col}: {e}")
             continue
     
+    if not signal_strength:
+        print("Warning: No valid columns found for signal strength analysis")
+        return pd.DataFrame()
+    
     signal_df = pd.DataFrame(signal_strength).sort_values('gini', ascending=False, key=abs)
+    
+    # Display results with statistical interpretation
+    if statistical_tests and STATS_AVAILABLE:
+        print(f"\nSignal Strength Analysis (with statistical significance at α = {alpha})")
+        print("="*70)
+        
+        # Create display dataframe
+        display_df = signal_df.copy()
+        
+        # Format correlation with confidence interval
+        if 'correlation_ci_lower' in display_df.columns:
+            display_df['correlation_with_ci'] = display_df.apply(
+                lambda row: f"{row['correlation']:.3f} [{row['correlation_ci_lower']:.3f}, {row['correlation_ci_upper']:.3f}]" 
+                if pd.notna(row['correlation_ci_lower']) else f"{row['correlation']:.3f}",
+                axis=1
+            )
+        
+        # Add significance indicators
+        if 'correlation_significant' in display_df.columns:
+            display_df['significance'] = display_df['correlation_significant'].apply(
+                lambda x: '***' if x else 'ns' if pd.notna(x) else 'n/a'
+            )
+        
+        # Select columns for display
+        display_cols = ['column', 'correlation_with_ci', 'significance', 'gini', 'max_lift', 'sample_size']
+        display_cols = [col for col in display_cols if col in display_df.columns]
+        
+        if display_cols:
+            print(tabulate(display_df[display_cols].head(15), headers='keys', tablefmt='grid', floatfmt='.3f'))
+            print("\nLegend: *** = significant, ns = not significant, n/a = test not performed")
+            print("CI = 95% confidence interval for correlation")
+    
     return signal_df
 
 # ==================== GROUPING AND AGGREGATION FUNCTIONS ====================
 
-def group_analyze(df, group_col, target_col, numeric_cols=None, show_lift=True, top_n=None):
+def group_analyze(df, group_col, target_col, numeric_cols=None, show_lift=True, top_n=None, 
+                 confidence_level=0.95, statistical_tests=True, alpha=0.05):
     """
-    Group data and analyze target rates with additional metrics
+    Enhanced group analysis with statistical rigor
     
     Parameters:
-    - group_col: Column to group by
-    - target_col: Binary target column
-    - numeric_cols: List of numeric columns to include stats for
-    - show_lift: Whether to show lift vs overall rate
-    - top_n: Show only top N groups by size
+    -----------
+    df : pd.DataFrame
+        Input DataFrame
+    group_col : str
+        Column to group by
+    target_col : str
+        Target column to analyze
+    numeric_cols : list, optional
+        Additional numeric columns to analyze
+    show_lift : bool
+        Whether to calculate lift metrics
+    top_n : int, optional
+        Show only top N groups
+    confidence_level : float
+        Confidence level for intervals (default 0.95)
+    statistical_tests : bool
+        Whether to perform statistical significance tests
+    alpha : float
+        Significance level for tests (default 0.05)
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing grouped results and statistical test results
     """
     # Calculate overall rate for lift calculation
     overall_rate = df[target_col].mean()
@@ -492,8 +632,62 @@ def group_analyze(df, group_col, target_col, numeric_cols=None, show_lift=True, 
     if top_n:
         grouped = grouped.head(top_n)
     
+    # Add confidence intervals for rates
+    if STATS_AVAILABLE:
+        for group in grouped.index:
+            n = int(grouped.loc[group, 'count'])
+            successes = int(grouped.loc[group, 'positives'])
+            ci_result = proportion_confidence_interval(
+                successes, n, confidence_level=confidence_level, method='wilson'
+            )
+            grouped.loc[group, 'ci_lower'] = ci_result['lower_ci']
+            grouped.loc[group, 'ci_upper'] = ci_result['upper_ci']
+    else:
+        # Fallback to basic binomial confidence intervals
+        for group in grouped.index:
+            n = grouped.loc[group, 'count']
+            p = grouped.loc[group, 'rate']
+            ci = stats.binom.interval(confidence_level, n, p)
+            grouped.loc[group, 'ci_lower'] = ci[0] / n
+            grouped.loc[group, 'ci_upper'] = ci[1] / n
+    
+    # Perform statistical tests if requested
+    test_results = {}
+    if statistical_tests and STATS_AVAILABLE:
+        # Chi-square test for independence (if categorical)
+        try:
+            contingency_table = pd.crosstab(df[group_col], df[target_col])
+            chi2_result = chi_square_test(df, group_col, target_col, alpha=alpha)
+            test_results['chi_square'] = chi2_result
+        except Exception as e:
+            print(f"Warning: Could not perform chi-square test: {e}")
+        
+        # Pairwise comparisons between groups (if continuous target)
+        if df[target_col].dtype in ['int64', 'float64'] and len(grouped) > 1:
+            groups_data = [df[df[group_col] == group][target_col].values 
+                          for group in grouped.index]
+            
+            if len(groups_data) == 2:
+                # Two-group comparison
+                comparison_result = compare_two_groups(
+                    groups_data[0], groups_data[1], alpha=alpha
+                )
+                test_results['two_group_comparison'] = comparison_result
+            elif len(groups_data) > 2:
+                # Multiple group comparison
+                comparison_result = compare_multiple_groups(
+                    groups_data, alpha=alpha, post_hoc=True
+                )
+                test_results['multiple_group_comparison'] = comparison_result
+    
     # Format for display
     display_df = grouped.copy()
+    
+    # Add confidence interval display column
+    if 'ci_lower' in grouped.columns and 'ci_upper' in grouped.columns:
+        display_df['confidence_interval'] = display_df.apply(
+            lambda row: f"[{row['ci_lower']:.3f}, {row['ci_upper']:.3f}]", axis=1
+        )
     
     # Format percentage columns
     pct_cols = ['rate', 'pct_of_total', 'pct_of_positives']
@@ -517,7 +711,49 @@ def group_analyze(df, group_col, target_col, numeric_cols=None, show_lift=True, 
     print(f"Overall {target_col} rate: {overall_rate:.2%}")
     print(table)
     
-    return grouped
+    # Display statistical test results
+    if test_results:
+        print(f"\n{'='*50}")
+        print("STATISTICAL TEST RESULTS")
+        print(f"{'='*50}")
+        
+        if 'chi_square' in test_results:
+            chi2 = test_results['chi_square']
+            print(f"\nChi-square test for independence:")
+            print(f"χ² = {chi2['chi2_statistic']:.3f}, {format_p_value(chi2['p_value'])}")
+            print(f"Effect size (Cramer's V) = {chi2['cramers_v']:.3f} ({chi2['effect_size_interpretation']})")
+            print(f"Result: {interpret_p_value(chi2['p_value'], alpha)}")
+            if not chi2['assumptions_met']:
+                print("Warning: Chi-square test assumptions may be violated")
+        
+        if 'two_group_comparison' in test_results:
+            comp = test_results['two_group_comparison']
+            print(f"\n{comp['test_name']}:")
+            print(f"Statistic = {comp['statistic']:.3f}, {format_p_value(comp['p_value'])}")
+            print(f"Effect size ({comp['effect_size_name']}) = {comp['effect_size']:.3f} ({comp['effect_size_interpretation']})")
+            print(f"Result: {interpret_p_value(comp['p_value'], alpha)}")
+        
+        if 'multiple_group_comparison' in test_results:
+            comp = test_results['multiple_group_comparison']
+            print(f"\n{comp['test_name']}:")
+            print(f"Statistic = {comp['statistic']:.3f}, {format_p_value(comp['p_value'])}")
+            print(f"Effect size ({comp['effect_size_name']}) = {comp['effect_size']:.3f} ({comp['effect_size_interpretation']})")
+            print(f"Result: {interpret_p_value(comp['p_value'], alpha)}")
+            
+            if 'post_hoc_comparisons' in comp and comp['post_hoc_comparisons']:
+                print(f"\nPost-hoc pairwise comparisons (Bonferroni corrected):")
+                for i, pair_comp in enumerate(comp['post_hoc_comparisons']):
+                    g1, g2 = pair_comp['group_indices']
+                    group_names = list(grouped.index)
+                    print(f"  {group_names[g1]} vs {group_names[g2]}: "
+                          f"{format_p_value(pair_comp['p_value_corrected'])} "
+                          f"({'significant' if pair_comp['significant_corrected'] else 'not significant'})")
+    
+    return {
+        'grouped_results': grouped,
+        'test_results': test_results,
+        'display_table': display_df
+    }
 
 def group_compare(df, group_col1, group_col2, target_col, min_size=30):
     """
